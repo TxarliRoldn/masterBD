@@ -61,12 +61,14 @@ enumerate <- function(...) {
 }
 
 # Plot functions
+colors <- c("CO"    = "#CD3333",
+            "C6H6"  = "#EE7621",
+            "NOy"   = "#EEC900",
+            "NO2"   = "#43CD80",
+            "Temp"  = "#009ACD",
+            "TempM" = "#8B008B")
+
 pretty_ts  <- function(.data, .var, title, index = NULL, type = "histogram", lag_max = NULL) {
-    colors <- c("CO"   = "#CD3333",
-                "C6H6" = "#EEC900",
-                "NOy"  = "#43CD80",
-                "NO2"  = "#009ACD",
-                "Temp" = "#8B008B")
     if (!is_tsibble(.data)) {
         .data <- .data %>% as_tsibble(index = index)
     }
@@ -109,13 +111,7 @@ pretty_ts  <- function(.data, .var, title, index = NULL, type = "histogram", lag
     print(p1 / (p2 | p3))
 }
 
-pretty_resid  <- function(.data, .var, title, lag_max = NULL, custom_color = NULL) {
-    colors <- c("CO"   = "#CD3333",
-                "C6H6" = "#EEC900",
-                "NOy"  = "#43CD80",
-                "NO2"  = "#009ACD",
-                "Temp" = "#8B008B")
-    if (!is.null(custom_color)) {colors[.var] = custom_color}
+pretty_resid  <- function(.data, .var, title, lag_max = NULL) {
     norm <- sqrt(nrow(.data))
     p1   <- .data %>%
         autoplot(.data[[".resid"]], color = colors[.var]) +
@@ -142,11 +138,6 @@ pretty_resid  <- function(.data, .var, title, lag_max = NULL, custom_color = NUL
 }
 
 compare_box_cox <- function(.data, .var, title) {
-    colors   <- c("CO" = "#CD3333",
-                "C6H6" = "#EEC900",
-                "NOy"  = "#43CD80",
-                "NO2"  = "#009ACD",
-                "Temp" = "#8B008B")
     .data$bc <- box_cox_vec(.data[[.var]], silent = TRUE)
     stl_nm   <- stl(as.ts(.data)[, .var], 24)$time.series[, "trend"] %>% as_tibble()
     stl_bc   <- stl(as.ts(.data)[, "bc"], 24)$time.series[, "trend"] %>% as_tibble()
@@ -404,6 +395,9 @@ These are imputed with the value just before them.
 # Input missing values
 data <- data %>% fill(everything())
 
+# Duplicate Temp variable for later convenience
+data <- data %>% mutate(TempM = Temp)
+
 # Train-test split and CV splits
 traintest <- data %>%
     time_series_split(date_var = Date, initial = "10 months", assess = "2 months")
@@ -440,7 +434,7 @@ decide upon by looking at the next graph.
 Then, we check and see using unitroot tests that a normal difference is not
 needed for the time series to reach a white-noise behaviour.
 
-```{r, cache=TRUE}
+```{r}
 train_ts %>%
     mutate(CO = box_cox_vec(CO, silent = TRUE)) %>% 
     pretty_ts("CO", "Box-Cox transformed CO", type = "partial", lag_max = 72)
@@ -517,7 +511,7 @@ By looking at the following plots it does indeed appear
 that this transformation helps in getting a time series
 with which we may work more easily.
 
-```{r, cache=TRUE}
+```{r}
 train_ts %>% compare_box_cox("C6H6", "Benzene atmosferic concentration")
 ```
 
@@ -525,7 +519,7 @@ Looking at previous ACF, we are going to apply a 24-hour differentiation.
 Then, we check and see using unitroot tests that a normal difference is not needed
 for the time series to reach a white-noise behaviour.
 
-```{r, cache=TRUE}
+```{r}
 train_ts %>%
     mutate(C6H6 = box_cox_vec(C6H6, silent = TRUE)) %>% 
     pretty_ts("C6H6", "Box-Cox transformed Benzene", type = "partial", lag_max = 72)
@@ -604,14 +598,14 @@ In contrast with the previous gases, here the utility
 of the transformation is critical in getting
 a somewhat homoskedastic time series.
 
-```{r, cache=TRUE}
+```{r}
 train_ts %>% compare_box_cox("NOy", "Nitrogen Oxides atmosferic concentration")
 ```
 
 If we plot the ACF of the transformed data, we see justification
 for the seasonal differentiation.
 
-```{r, cache=TRUE}
+```{r}
 train_ts %>%
     mutate(NOy = box_cox_vec(NOy, silent = TRUE)) %>% 
     pretty_ts("NOy", "Box-Cox transformed Nitrogen Oxides", type = "partial", lag_max = 72)
@@ -698,7 +692,7 @@ Hence we differentiate with 24 lags.
 If we plot the ACF of the transformed data, we see justification
 for the seasonal differentiation.
 
-```{r, cache=TRUE}
+```{r}
 train_ts %>%
     mutate(NO2 = box_cox_vec(NO2, silent = TRUE)) %>% 
     pretty_ts("NO2", "Box-Cox transformed Nitrogen Oxides", type = "partial", lag_max = 72)
@@ -785,25 +779,25 @@ is to be expected from the high frequency of this time series.
 p1 <- train_ts %>%
     filter(year(Date) == 2005) %>% 
     autoplot(CO) +
-    autolayer(forecast(prophet_CO,   test_ts),  CO,  colour = "#CD3333") +
+    autolayer(forecast(prophet_CO,   test_ts),  CO,  colour = colors["CO"]) +
     autolayer(test_ts, CO,   color = "#838B8B", alpha = 0.75) +
     labs(x = "", y = "Carbon Monoxide")
 p2 <- train_ts %>%
     filter(year(Date) == 2005) %>% 
     autoplot(C6H6) +
-    autolayer(forecast(prophet_C6H6, test_ts), C6H6, colour = "#EEC900") +
+    autolayer(forecast(prophet_C6H6, test_ts), C6H6, colour = colors["C6H6"]) +
     autolayer(test_ts, C6H6, color = "#838B8B", alpha = 0.75) +
     labs(x = "", y = "Benzene")
 p3 <- train_ts %>%
     filter(year(Date) == 2005) %>% 
     autoplot(NOy) +
-    autolayer(forecast(prophet_NOy,  test_ts), NOy,  colour = "#43CD80") +
+    autolayer(forecast(prophet_NOy,  test_ts), NOy,  colour = colors["NOy"]) +
     autolayer(test_ts, NOy,  color = "#838B8B", alpha = 0.75) +
     labs(x = "", y = "Nitrogen Oxides")
 p4 <- train_ts %>%
     filter(year(Date) == 2005) %>% 
     autoplot(NO2) +
-    autolayer(forecast(prophet_NO2,  test_ts), NO2,  colour = "#009ACD") +
+    autolayer(forecast(prophet_NO2,  test_ts), NO2,  colour = colors["NO2"]) +
     autolayer(test_ts, NO2,  color = "#838B8B", alpha = 0.75) +
     labs(x = "", y = "Nitrogen Dioxide")
 p1 / p2
@@ -836,20 +830,20 @@ forecast_NO2  <- data_ts %>%
 ```{r}
 p1 <- data_ts %>% 
     autoplot(CO) +
-    autolayer(forecast_CO,   CO,   color = "#CD3333") +
+    autolayer(forecast_CO,   CO,   color = colors["CO"]) +
     labs(x = "", y = "Carbon Monoxide")
 p2 <- data_ts %>% 
     autoplot(C6H6) +
-    autolayer(forecast_C6H6, C6H6, color = "#EEC900") +
+    autolayer(forecast_C6H6, C6H6, color = colors["C6H6"]) +
     labs(x = "", y = "Benzene")
 p3 <- data_ts %>% 
     autoplot(NOy) +
-    autolayer(forecast_NOy,   NOy,  color = "#43CD80") +
+    autolayer(forecast_NOy,  NOy,  color = colors["NOy"]) +
     labs(x = "", y = "Nitrogen Oxides") +
     coord_cartesian(ylim = c(NA, 1500))
 p4 <- data_ts %>% 
     autoplot(NO2) +
-    autolayer(forecast_NO2,  NO2,  color = "#009ACD") +
+    autolayer(forecast_NO2,  NO2,  color = colors["NO2"]) +
     labs(x = "", y = "Nitrogen Dioxide")
 p1 / p2
 p3 / p4
@@ -876,7 +870,7 @@ For this purpose, we are going to apply a 24-hour differentiation.
 Then, we check and see using unitroot tests that a normal difference is
 not needed.
 
-```{r temp_tests, cache=TRUE}
+```{r}
 # Let's differentiate seasonably. Then check if more differences are needed
 train_ts %>% 
     mutate(dTemp = difference(Temp, 24)) %>% 
@@ -959,7 +953,7 @@ Overall, these are very satisfying results.
 train_ts %>%
     filter(year(Date) == 2005) %>% 
     autoplot(Temp) +
-    autolayer(forecast(tslm_Temp, test_ts), Temp, colour = "#8B008B") +
+    autolayer(forecast(tslm_Temp, test_ts), Temp, colour = colors["Temp"]) +
     autolayer(test_ts, Temp, color = "#838B8B", alpha = 0.75) +
     labs(x = "", y = "Temperature")
 ```
@@ -976,7 +970,7 @@ forecast_Temp <- data_ts %>%
 
 data_ts %>% 
     autoplot(Temp) +
-    autolayer(forecast_Temp, Temp, color = "#8B008B") +
+    autolayer(forecast_Temp, Temp, color = colors["Temp"]) +
     labs(x = "", y = "Temperature")
 ```
 
@@ -994,41 +988,41 @@ happen to be related with the temperature.
 ```{r}
 # All
 predict_model <- train_ts %>% 
-    model(TSLM(Temp ~ trend() + fourier(period = 24, K = 3) +
-                      fourier(period = "1 year", K = 1) + 
-                      CO + C6H6 + NOy + NO2 +
-                      lag(CO, 24) + lag(C6H6, 24) + lag(NOy, 24) + lag(NO2, 24)))
+    model(TSLM(TempM ~ trend() + fourier(period = 24, K = 3) +
+                       fourier(period = "1 year", K = 1) + 
+                       CO + C6H6 + NOy + NO2 +
+                       lag(CO, 24) + lag(C6H6, 24) + lag(NOy, 24) + lag(NO2, 24)))
 predict_model %>% report()
 
 # lag NOy out
 predict_model <- train_ts %>% 
-    model(TSLM(Temp ~ trend() + fourier(period = 24, K = 3) +
-                      fourier(period = "1 year", K = 1) + 
-                      CO + C6H6 + NOy + NO2 +
-                      lag(CO, 24) + lag(C6H6, 24) + lag(NO2, 24)))
+    model(TSLM(TempM ~ trend() + fourier(period = 24, K = 3) +
+                       fourier(period = "1 year", K = 1) + 
+                       CO + C6H6 + NOy + NO2 +
+                       lag(CO, 24) + lag(C6H6, 24) + lag(NO2, 24)))
 predict_model %>% report()
 
 # NO2 out
 predict_model <- train_ts %>% 
-    model(TSLM(Temp ~ trend() + fourier(period = 24, K = 3) +
-                      fourier(period = "1 year", K = 1) + 
-                      CO + C6H6 + NOy +
-                      lag(CO, 24) + lag(C6H6, 24) + lag(NO2, 24)))
+    model(TSLM(TempM ~ trend() + fourier(period = 24, K = 3) +
+                       fourier(period = "1 year", K = 1) + 
+                       CO + C6H6 + NOy +
+                       lag(CO, 24) + lag(C6H6, 24) + lag(NO2, 24)))
 predict_model %>% report()
 
 # lag NO2 out
 predict_model <- train_ts %>% 
-    model(TSLM(Temp ~ trend() + fourier(period = 24, K = 3) +
-                      fourier(period = "1 year", K = 1) + 
-                      CO + C6H6 + NOy +
-                      lag(CO, 24) + lag(C6H6, 24)))
+    model(TSLM(TempM ~ trend() + fourier(period = 24, K = 3) +
+                       fourier(period = "1 year", K = 1) + 
+                       CO + C6H6 + NOy +
+                       lag(CO, 24) + lag(C6H6, 24)))
 predict_model %>% report()
 
 # lag CO out
 predict_model <- train_ts %>% 
-    model(TSLM(Temp ~ trend() + fourier(period = 24, K = 3) +
-                      fourier(period = "1 year", K = 1) + 
-                      CO + C6H6 + NOy + lag(C6H6, 24)))
+    model(TSLM(TempM ~ trend() + fourier(period = 24, K = 3) +
+                       fourier(period = "1 year", K = 1) + 
+                       CO + C6H6 + NOy + lag(C6H6, 24)))
 predict_model %>% report()
 ```
 
@@ -1045,7 +1039,7 @@ contributions due to Nitrogen Dioxide.
 ```{r, message=FALSE}
 predict_model %>% 
     residuals() %>%
-    pretty_resid("Temp", title = "Residuals for Temperature", custom_color = "#CD1076")
+    pretty_resid("TempM", title = "Residuals for Temperature (multi)")
 ```
 
 If we look at the performance on the train partition we note
@@ -1056,10 +1050,10 @@ the range that the temperature actually follows.
 ```{r}
 train_ts %>%
     filter(year(Date) == 2005) %>% 
-    autoplot(Temp) +
-    autolayer(forecast(predict_model, test_ts), Temp, colour = "#CD1076") +
-    autolayer(test_ts, Temp, color = "#838B8B", alpha = 0.75) +
-    labs(x = "", y = "Temperature")
+    autoplot(TempM) +
+    autolayer(forecast(predict_model, test_ts), TempM, colour = colors["TempM"]) +
+    autolayer(test_ts, TempM, color = "#838B8B", alpha = 0.75) +
+    labs(x = "", y = "Temperature (multi)")
 ```
 
 Now we may look at the 6 month forecast into the future.
@@ -1073,14 +1067,14 @@ future_data    <- new_data(data_ts, n = 4383) %>%
     mutate(CO  = forecast_CO$.mean,  C6H6 = forecast_C6H6$.mean,
            NOy = forecast_NOy$.mean, NO2  = forecast_NO2$.mean)
 forecast_multi <- data_ts %>% 
-    model(TSLM(Temp ~ trend() + fourier(period = 24, K = 3) +
-                      fourier(period = "1 year", K = 1) + 
-                      CO + C6H6 + NOy + lag(C6H6, 24))) %>% 
+    model(TSLM(TempM ~ trend() + fourier(period = 24, K = 3) +
+                       fourier(period = "1 year", K = 1) + 
+                       CO + C6H6 + NOy + lag(C6H6, 24))) %>% 
     forecast(future_data)
 data_ts %>% 
     autoplot(Temp) +
-    autolayer(forecast_multi, Temp, color = "#CD1076") +
-    labs(x = "", y = "Temperature")
+    autolayer(forecast_multi, TempM, color = colors["TempM"]) +
+    labs(x = "", y = "Temperature (multi)")
 ```
 
 ## Conclusions
@@ -1106,28 +1100,28 @@ part of the project has been successfully accomplished.
 ```{r}
 p1 <- data_ts %>% 
     autoplot(CO) +
-    autolayer(forecast_CO,    CO,   color = "#CD3333") +
+    autolayer(forecast_CO,    CO,    color = colors["CO"]) +
     labs(x = "", y = "Carbon Monoxide")
 p2 <- data_ts %>% 
     autoplot(C6H6) +
-    autolayer(forecast_C6H6,  C6H6, color = "#EEC900") +
+    autolayer(forecast_C6H6,  C6H6,  color = colors["C6H6"]) +
     labs(x = "", y = "Benzene")
 p3 <- data_ts %>% 
     autoplot(NOy) +
-    autolayer(forecast_NOy,   NOy,  color = "#43CD80") +
+    autolayer(forecast_NOy,   NOy,   color = colors["NOy"]) +
     labs(x = "", y = "Nitrogen Oxides") +
     coord_cartesian(ylim = c(NA, 1500))
 p4 <- data_ts %>% 
     autoplot(NO2) +
-    autolayer(forecast_NO2,   NO2,  color = "#009ACD") +
+    autolayer(forecast_NO2,   NO2,   color = colors["NO2"]) +
     labs(x = "", y = "Nitrogen Dioxide")
 p5 <- data_ts %>% 
     autoplot(Temp) +
-    autolayer(forecast_Temp,  Temp, color = "#8B008B") +
+    autolayer(forecast_Temp,  Temp,  color = colors["Temp"]) +
     labs(x = "", y = "Temperature")
 p6 <- data_ts %>% 
-    autoplot(Temp) +
-    autolayer(forecast_multi, Temp, color = "#CD1076") +
+    autoplot(TempM) +
+    autolayer(forecast_multi, TempM, color = colors["TempM"]) +
     labs(x = "", y = "Temperature (multi)")
 p1 / p2
 p3 / p4
