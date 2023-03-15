@@ -12,7 +12,7 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 ```
 
 # Introduction
@@ -20,7 +20,7 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
 Let us first start by installing and loading the packages we will use
 during this whole assignment.
 
-```{r, message=FALSE, results=FALSE}
+```{r, results=FALSE}
 i.p <- (\(x) is.null(install.packages(x, repos = "https://cran.rediris.es")))
 
 # gsub on files
@@ -68,10 +68,7 @@ colors <- c("CO"    = "#CD3333",
             "Temp"  = "#009ACD",
             "TempM" = "#8B008B")
 
-pretty_ts  <- function(.data, .var, title, index = NULL, type = "histogram", lag_max = NULL) {
-    if (!is_tsibble(.data)) {
-        .data <- .data %>% as_tsibble(index = index)
-    }
+pretty_ts  <- function(.data, .var, title, type = "histogram", lag_max = NULL) {
     norm <- sqrt(nrow(.data))
     p1   <- .data %>%
         autoplot(.data[[.var]], color = colors[.var]) +
@@ -174,7 +171,7 @@ The code below will fetch the data and extract it for us. It will also
 apply basic transformations to help the code parse the input by
 transforming the fields to the CSV standard.
 
-```{r}
+```{r, results = FALSE}
 download_url <- paste0("https://archive.ics.uci.edu/ml/",
                        "machine-learning-databases/00360/AirQualityUCI.zip")
 
@@ -211,12 +208,13 @@ and visualization.
     should we.
 
 ```{r preprocessing}
-data <- data %>%
+data_ts <- data %>%
     add_column(Datetime = as.POSIXct(paste(data$Date, data$Time), 
                                      format = "%d/%m/%Y %H.%M.%S",
                                      tz = "GMT"), .before = 1) %>% 
     select(!c(Date, Time)) %>% 
-    replace(. == -200, NA)
+    replace(. == -200, NA) %>% 
+    as_tsibble(index = Datetime)
 ```
 
 Now we select what are the time series we are interested in.
@@ -226,7 +224,7 @@ temperature.
 These will be the time series we will focus for the rest of the assignment.
 
 ```{r}
-data <- data %>% 
+data_ts <- data_ts %>% 
     select(c("Datetime", "T", ends_with("(GT)")))
 ```
 
@@ -237,17 +235,17 @@ Hence we decide to remove the aforementioned variable and keep the rest which
 have a count of NAs which we may handle.
 
 ```{r}
-data %>% is.na() %>% colSums()
-data <- data %>% select(!"NMHC(GT)")
+data_ts %>% is.na() %>% colSums()
+data_ts <-  data_ts %>% select(!"NMHC(GT)")
 ```
 
 Lastly, for convenience, we rename the columns to get rid of the `(GT)` which
 was used to indicate reference analyser variables.
 
 ```{r}
-colnames(data)    <- gsub("[(]GT[)]", "", colnames(data))
-colnames(data)[1] <- "Date"
-colnames(data)[2] <- "Temp"
+colnames(data_ts)    <- gsub("[(]GT[)]", "", colnames(data_ts))
+colnames(data_ts)[1] <- "Date"
+colnames(data_ts)[2] <- "Temp"
 ```
 
 # Descriptive Analysis
@@ -258,8 +256,8 @@ an annual period.
 If look at the ACF, we have a revealed daily seasonality that make sense
 from temperature measurements.
 
-```{r, message=FALSE}
-data %>% pretty_ts("Temp", index = "Date", title = "Temperature [°C]")
+```{r}
+data_ts %>% pretty_ts("Temp", title = "Temperature [°C]")
 ```
 
 For the CO concentrations we have a different picture.
@@ -277,8 +275,8 @@ usually semi-daily period, namely during the morning and late afternoon.
 Nonetheless, its seasonality appears to be weaker than in the case of the
 temperature.
 
-```{r, message=FALSE}
-data %>% pretty_ts("CO", index = "Date", title = "CO [mg/m³]")
+```{r}
+data_ts %>% pretty_ts("CO", title = "CO [mg/m³]")
 ```
 
 Benzene ($C_6H_6$) emit channels are a subset of those for carbon
@@ -290,8 +288,8 @@ a much smaller trend component.
 Our intuition is that the reduced emit channels are the cause of this
 difference.
 
-```{r, message=FALSE}
-data %>% pretty_ts("C6H6", index = "Date", title = "Benzene [μg/m³]")
+```{r}
+data_ts %>% pretty_ts("C6H6", title = "Benzene [μg/m³]")
 ```
 
 Nitrogen oxides are another family of polluting agents.
@@ -309,10 +307,10 @@ approximating the air pressure as a constant and taking the volume to be
 $24.45$ litres at $25$ degree Celsius.
 
 ```{r}
-data$NOy <- data$NOx - data$NO2 * 24.45/46.006 * (273.25 + data$Temp)/298.25
+data_ts$NOy <- data_ts$NOx - 24.45/46.006*data_ts$NO2 * (273.25 + data_ts$Temp)/298.25
 
 # Delete pathological cases
-data$NOy[data$NOy < 0] <- NA
+data_ts$NOy[data_ts$NOy < 0] <- NA
 ```
 
 We have renamed this, now $NO_2$ stripped, variable to $NO_y$ for convenience.
@@ -324,8 +322,8 @@ latter being more prominent.
 As an explanation, we may track car pollution, which operate on the same
 frequency, e.g. workers going and coming back from work by car or bus.
 
-```{r, message=FALSE}
-data %>% pretty_ts("NOy", index = "Date", title = "Nitrogen Oxides [ppb]")
+```{r}
+data_ts %>% pretty_ts("NOy", title = "Nitrogen Oxides [ppb]")
 ```
 
 The $NO_2$ exhibits a very different pattern, justifying the prior
@@ -337,8 +335,8 @@ resembles a kind of stationary signal.
 Moreover, the seasonality appears to be strictly daily, with a very
 fast ACF decrease, which indicates absence of trend.
 
-```{r, message=FALSE}
-data %>% pretty_ts("NO2", index = "Date", title = "Nitrogen Dioxide [μg/m³]")
+```{r}
+data_ts %>% pretty_ts("NO2", title = "Nitrogen Dioxide [μg/m³]")
 ```
 
 # Forecasting
@@ -366,12 +364,12 @@ We can note that in general we have very right-skewed distributions
 which may benefit from a low-$\lambda$ Box-Cox transformation.
 
 2. We will implement five models for each agent: an automatic ARIMA, a manual
-ARIMA, an automatic ETS, a Prophet model and an automatic TSLM with a 5th order
-Fourier component.
+ARIMA, an automatic ETS, a Prophet model and an automatic TSLM with a various
+Fourier components which account for all possible periodicities.
 For the manual ARIMA we will proceed by differentiating to white-noise and
 interpret the ACF and PACF.
 
-3. Each of these models will be tested using 5-fold cross-validation.
+3. Each of these models will be tested using 3-fold cross-validation.
 Using the RMSE we will extract which model performed better.
 Then, we will select the model which performed better on the majority
 of the folds.
@@ -384,33 +382,33 @@ which we will make decisions and apply cross-validation, and a test
 partition, to get an estimation of the performance we may expect.
 This split will be made giving the training set 5 times more data than to
 the test one.
-For the cross-validation we will consider 5 months as training part
+For the cross-validation we will consider 7 months as training part
 and 1 more for testing.
 Note that cross-validation splits are taken from the train partition.
 We also take here the chance to input all `NA` data as they make
 some of the models invalid.
 These are imputed with the value just before them.
 
-```{r, cache=TRUE}
+```{r}
 # Input missing values
-data <- data %>% fill(everything())
+data_ts <- data_ts %>% fill(everything())
 
 # Duplicate Temp variable for later convenience
-data <- data %>% mutate(TempM = Temp)
+data_ts <- data_ts %>% mutate(TempM = Temp)
 
 # Train-test split and CV splits
-traintest <- data %>%
+traintest <- data_ts %>%
+    as_tibble() %>% 
     time_series_split(date_var = Date, initial = "10 months", assess = "2 months")
 cvsplits  <- training(traintest) %>% 
     time_series_cv(date_var    = Date,
-                   initial     = "5 months",
+                   initial     = "7 months",
                    assess      = "1 month",
                    skip        = "1 month",
-                   slice_limit = 5,
+                   slice_limit = 3,
                    cumulative  = FALSE)
 
 # Convert to tsibble for convenience
-data_ts  <- data %>% as_tsibble(index = Date)
 train_ts <- training(traintest) %>% as_tsibble(index = Date)
 test_ts  <- testing(traintest)  %>% as_tsibble(index = Date)
 ```
@@ -425,7 +423,7 @@ that this transformation helps in getting a time series
 with which we may work more easily.
 
 ```{r}
-train_ts %>% compare_box_cox("CO", "CO atmosferic concentration")
+train_ts %>% compare_box_cox("CO", "CO atmosferic concentration [mg/m³]")
 ```
 
 Now we need to examine the time series to create an appropriate ARIMA model.
@@ -448,18 +446,17 @@ train_ts %>%
 # Difference and see if stationary
 train_ts %>%
     mutate(CO = difference(box_cox_vec(CO, silent = TRUE), 24)) %>% 
-    pretty_ts("CO", "Diff (Diff_24) Box-Cox transformed CO", type = "partial", lag_max = 72)
+    pretty_ts("CO", "Diff_24 Box-Cox transformed CO", type = "partial", lag_max = 72)
 ```
 
 Looking at the ACF and PACF we decide that an $ARIMA(3,0,0)(3,1,0)[24]$ is
 the optimal choice.
 Having that in mind, we proceed to test this model along with the rest of the
-considered: auto ARIMA, auto ETS and Prophet.
+considered: auto ARIMA, auto ETS, Prophet and TSLM.
 
-```{r CO_models, message=FALSE, results=FALSE, cache=TRUE}
+```{r CO_models, cache=TRUE}
 # Look at PACF    => p = 3
 # Look at PACF_24 => P = 3
-best_CO <- rep(0, length(cvsplits$splits))
 for (sp in enumerate(cvsplits$splits)) {
     trndat <- training(sp[[2]]) %>% as_tsibble(index = Date)
     tstdat <- testing(sp[[2]])  %>% as_tsibble(index = Date)
@@ -471,37 +468,39 @@ for (sp in enumerate(cvsplits$splits)) {
             auto_arima   = ARIMA(box_cox(CO, lam) ~ PDQ(period = 24)),
             prophet      = prophet(box_cox(CO, lam) ~ season(period = 24)),
             auto_ets     = ETS(box_cox(CO, lam) ~ season(period = 24)),
-            auto_tslm    = TSLM(box_cox(CO, lam) ~ trend() + fourier(period = 24, K = 5))
-        ) %>% 
+            auto_tslm    = TSLM(box_cox(CO, lam) ~ trend() +
+                                    fourier(period = "1 day",   K = 3) +
+                                    fourier(period = "1 year",  K = 3))) %>% 
         forecast(tstdat) %>% 
         accuracy(data_ts)
-
-    best_CO[sp$ix] <- which.min(models_CO$RMSE)
+    
+    print(paste("The best model for split", sp$ix, "is",
+                models_CO$.model[which.min(models_CO$RMSE)]))
 }
-```
-
-Based on the RMSE, we see which model better performed for carbon monoxide.
-
-```{r, cache=TRUE}
-for (ix in seq_along(cvsplits$splits)) {
-    print(paste("The best model for split", ix, "is", models_CO$.model[best_CO[ix]]))
-}
-print(paste("The best model overall is", models_CO$.model[most_freq(best_CO)]))
 ```
 
 We see that the residuals follow a normal distribution and a white-noise
 like waveform.
 Nevertheless, the ACF does still not resemble a white-noise ACF.
+We also visualize its performance on the test partition which
+captures the tendency and with the confidence intervals offers a good
+approximation on the range where real values are measured.
+It fails nevertheless to reproduce the correct oscillatory movement.
 
-```{r, message=FALSE}
-lam_CO     <- auto_lambda(train_ts$CO)
-prophet_CO <- train_ts %>% 
+```{r CO_test, cache=TRUE}
+lam_CO   <- auto_lambda(train_ts$CO)
+model_CO <- train_ts %>%
     model(prophet(box_cox(CO, lam_CO) ~ season(period = 24)))
-prophet_CO %>% 
+model_CO %>%
     residuals() %>%
-    pretty_resid("CO", title = "Residuals for Carbon Monoxide")
+    pretty_resid("CO", title = "Residuals for Carbon Monoxide [mg/m³]")
+train_ts %>%
+    filter(year(Date) == 2005) %>% 
+    autoplot(CO) +
+    autolayer(forecast(model_CO, test_ts), CO, color = colors["CO"]) +
+    autolayer(test_ts, CO, color = "#838B8B", alpha = 0.75) +
+    labs(x = "", y = "Carbon Monoxide [mg/m³]")
 ```
-
 
 ### Benzene
 
@@ -512,7 +511,7 @@ that this transformation helps in getting a time series
 with which we may work more easily.
 
 ```{r}
-train_ts %>% compare_box_cox("C6H6", "Benzene atmosferic concentration")
+train_ts %>% compare_box_cox("C6H6", "Benzene atmosferic concentration [μg/m³]")
 ```
 
 Looking at previous ACF, we are going to apply a 24-hour differentiation.
@@ -539,12 +538,11 @@ train_ts %>%
 Looking at the ACF and PACF we decide that an $ARIMA(2,0,0)(3,1,0)[24]$ is
 the optimal choice.
 Having that in mind, we proceed to test this model along with the rest of the
-considered: auto ARIMA, auto ETS and Prophet.
+considered: auto ARIMA, auto ETS Prophet and TSLM.
 
-```{r C6H6_models, message=FALSE, results=FALSE, cache=TRUE}
+```{r C6H6_models, cache=TRUE}
 # Look at PACF    => p = 2
 # Look at PACF_24 => P = 3
-best_C6H6 <- rep(0, length(cvsplits$splits))
 for (sp in enumerate(cvsplits$splits)) {
     trndat <- training(sp[[2]]) %>% as_tsibble(index = Date)
     tstdat <- testing(sp[[2]])  %>% as_tsibble(index = Date)
@@ -557,35 +555,36 @@ for (sp in enumerate(cvsplits$splits)) {
             auto_arima   = ARIMA(box_cox(C6H6, lam) ~ PDQ(period = 24)),
             prophet      = prophet(box_cox(C6H6, lam) ~ season(period = 24)),
             auto_ets     = ETS(box_cox(C6H6, lam) ~ season(period = 24)),
-            auto_tslm    = TSLM(box_cox(C6H6, lam) ~ trend() + fourier(period = 24, K = 5))
-        ) %>% 
+            auto_tslm    = TSLM(box_cox(C6H6, lam) ~ trend() +
+                                    fourier(period = "1 day",   K = 3) +
+                                    fourier(period = "1 year",  K = 3))) %>% 
         forecast(tstdat) %>% 
         accuracy(data_ts)
 
-    best_C6H6[sp$ix] <- which.min(models_C6H6$RMSE)
+    print(paste("The best model for split", sp$ix, "is",
+                models_C6H6$.model[which.min(models_C6H6$RMSE)]))
 }
-```
-
-Based on the RMSE, we see which model better performed for Benzene.
-
-```{r, cache=TRUE}
-for (ix in seq_along(cvsplits$splits)) {
-    print(paste("The best model for split", ix, "is", models_C6H6$.model[best_C6H6[ix]]))
-}
-print(paste("The best model overall is", models_C6H6$.model[most_freq(best_C6H6)]))
 ```
 
 We see that the residuals follow a normal distribution and a white-noise
 like waveform.
 Nevertheless, the ACF does still not resemble a white-noise ACF.
+As with CO, the forecast captures the tendency but not the correct
+oscillatory behaviour
 
-```{r, message=FALSE}
-lam_C6H6     <- auto_lambda(train_ts$C6H6)
-prophet_C6H6 <- train_ts %>% 
+```{r C6H6_test, cache=TRUE}
+lam_C6H6   <- auto_lambda(train_ts$C6H6)
+model_C6H6 <- train_ts %>%
     model(prophet(box_cox(C6H6, lam_C6H6) ~ season(period = 24)))
-prophet_C6H6 %>% 
+model_CO %>%
     residuals() %>%
-    pretty_resid("C6H6", title = "Residuals for Benzene")
+    pretty_resid("CO", title = "Residuals for Benzene [μg/m³]")
+train_ts %>%
+    filter(year(Date) == 2005) %>% 
+    autoplot(C6H6) +
+    autolayer(forecast(model_C6H6, test_ts), C6H6, color = colors["C6H6"]) +
+    autolayer(test_ts, C6H6, color = "#838B8B", alpha = 0.75) +
+    labs(x = "", y = "Benzene [μg/m³]")
 ```
 
 ### Nitrogen Oxides
@@ -599,7 +598,7 @@ of the transformation is critical in getting
 a somewhat homoskedastic time series.
 
 ```{r}
-train_ts %>% compare_box_cox("NOy", "Nitrogen Oxides atmosferic concentration")
+train_ts %>% compare_box_cox("NOy", "Nitrogen Oxides atmosferic concentration [ppb]")
 ```
 
 If we plot the ACF of the transformed data, we see justification
@@ -625,12 +624,11 @@ train_ts %>%
 Looking at the ACF and PACF we decide that an $ARIMA(3,0,0)(3,1,0)[24]$ is
 the optimal choice.
 Having that in mind, we proceed to test this model along with the rest of the
-considered: auto ARIMA, auto ETS and Prophet.
+considered: auto ARIMA, auto ETS, Prophet and TSLM.
 
-```{r NOy_models, message=FALSE, results=FALSE, cache=TRUE}
+```{r NOy_models, cache=TRUE}
 # Look at PACF    => p = 3
 # Look at PACF_34 => P = 3
-best_NOy <- rep(0, length(cvsplits$splits))
 for (sp in enumerate(cvsplits$splits)) {
     trndat <- training(sp[[2]]) %>% as_tsibble(index = Date)
     tstdat <- testing(sp[[2]])  %>% as_tsibble(index = Date)
@@ -642,35 +640,36 @@ for (sp in enumerate(cvsplits$splits)) {
             auto_arima   = ARIMA(box_cox(NOy, lam) ~ PDQ(period = 24)),
             prophet      = prophet(box_cox(NOy, lam) ~ season(period = 24)),
             auto_ets     = ETS(box_cox(NOy, lam) ~ season(period = 24)),
-            auto_tslm    = TSLM(box_cox(NOy, lam) ~ trend() + fourier(period = 24, K = 5))
-        ) %>% 
+            auto_tslm    = TSLM(box_cox(NOy, lam) ~ trend() +
+                                    fourier(period = "1 day",   K = 3) +
+                                    fourier(period = "1 year",  K = 3))) %>% 
         forecast(tstdat) %>% 
         accuracy(data_ts)
 
-    best_NOy[sp$ix] <- which.min(models_NOy$RMSE)
+    print(paste("The best model for split", sp$ix, "is",
+                models_NOy$.model[which.min(models_NOy$RMSE)]))
 }
-```
-
-Based on the RMSE, we see which model better performed for Nitrogen Oxides.
-
-```{r, cache=TRUE}
-for (ix in seq_along(cvsplits$splits)) {
-    print(paste("The best model for split", ix, "is", models_NOy$.model[best_NOy[ix]]))
-}
-print(paste("The best model overall is", models_NOy$.model[most_freq(best_NOy)]))
 ```
 
 We see that the residuals follow a normal distribution and a white-noise
 like waveform.
 Nevertheless, the ACF does still not resemble a white-noise ACF.
+On the performance in the test partition, the same conclusions extracted
+before apply here.
 
-```{r, message=FALSE}
-lam_NOy     <- auto_lambda(train_ts$NOy)
-prophet_NOy <- train_ts %>% 
+```{r NOy_test, cache=TRUE}
+lam_NOy   <- auto_lambda(train_ts$NOy)
+model_NOy <- train_ts %>%
     model(prophet(box_cox(NOy, lam_NOy) ~ season(period = 24)))
-prophet_NOy %>% 
+model_NOy %>%
     residuals() %>%
-    pretty_resid("NOy", title = "Residuals for Nitrogen Oxides")
+    pretty_resid("NOy", title = "Residuals for Nitrogen Oxides [ppb]")
+train_ts %>%
+    filter(year(Date) == 2005) %>% 
+    autoplot(NOy) +
+    autolayer(forecast(model_NOy, test_ts), NOy, color = colors["NOy"]) +
+    autolayer(test_ts, NOy, color = "#838B8B", alpha = 0.75) +
+    labs(x = "", y = "Nitrogen Oxides [ppb]")
 ```
 
 ### Nitrogen Dioxide
@@ -682,7 +681,7 @@ of all predicted values in the future, which is desirable.
 Hence we apply it here also.
 
 ```{r}
-train_ts %>% compare_box_cox("NO2", "Nitrogen Dioxide atmosferic concentration")
+train_ts %>% compare_box_cox("NO2", "Nitrogen Dioxide atmosferic concentration [μg/m³]")
 ```
 
 Looking at the ACF in the previous section, we note that
@@ -713,12 +712,11 @@ train_ts %>%
 Looking at the ACF and PACF we decide that an $ARIMA(2,0,0)(0,1,3)[24]$ is
 the optimal choice.
 Having that in mind, we proceed to test this model along with the rest of the
-considered: auto ARIMA, auto ETS and Prophet.
+considered: auto ARIMA, auto ETS, Prophet and TSLM.
 
-```{r NO2_models, message=FALSE, results=FALSE, cache=TRUE}
+```{r NO2_models, cache=TRUE}
 # Look at PACF    => p = 1
 # Look at ACF_24  => Q = 3
-best_NO2 <- rep(0, length(cvsplits$splits))
 for (sp in enumerate(cvsplits$splits)) {
     trndat <- training(sp[[2]]) %>% as_tsibble(index = Date)
     tstdat <- testing(sp[[2]])  %>% as_tsibble(index = Date)
@@ -730,124 +728,47 @@ for (sp in enumerate(cvsplits$splits)) {
             auto_arima   = ARIMA(box_cox(NO2, lam) ~ PDQ(period = 24)),
             prophet      = prophet(box_cox(NO2, lam) ~ season(period = 24)),
             auto_ets     = ETS(box_cox(NO2, lam) ~ season(period = 24)),
-            auto_tslm    = TSLM(box_cox(NO2, lam) ~ trend() + fourier(period = 24, K = 5))
-        ) %>% 
+            auto_tslm    = TSLM(box_cox(NO2, lam) ~ trend() + 
+                                    fourier(period = "1 day",   K = 3) +
+                                    fourier(period = "1 year",  K = 3))) %>% 
         forecast(tstdat) %>% 
         accuracy(data_ts)
 
-    best_NO2[sp$ix] <- which.min(models_NO2$RMSE)
+    print(paste("The best model for split", sp$ix, "is",
+                models_NO2$.model[which.min(models_NO2$RMSE)]))
 }
-```
-
-Based on the RMSE, we see which model better performed for Nitrogen Dioxide.
-
-```{r, cache=TRUE}
-for (ix in seq_along(cvsplits$splits)) {
-    print(paste("The best model for split", ix, "is", models_CO$.model[best_CO[ix]]))
-}
-print(paste("The best model overall is", models_CO$.model[most_freq(best_NO2)]))
 ```
 
 We see that the residuals follow a normal distribution and a white-noise
 like waveform.
-Nevertheless, the ACF does still not resemble a white-noise ACF.
+In contrast to previous series, here the ACF does resemble much closer
+the one expected from a white-noise signal.
+On the other hand, when comparing with the test partition, we see
+very wide confidence intervals which result in a much less
+precise model.
 
-```{r, message=FALSE}
-lam_NO2     <- auto_lambda(train_ts$NO2)
-prophet_NO2 <- train_ts %>% 
-    model(prophet(box_cox(NO2, lam_NO2) ~ season(period = 24)))
-prophet_NO2 %>% 
+```{r NO2_test, cache=TRUE}
+lam_NO2   <- auto_lambda(train_ts$NO2)
+model_NO2 <- train_ts %>%
+    model(ARIMA(box_cox(NO2, lam) ~ PDQ(period = 24)))
+model_NO2 %>%
     residuals() %>%
-    pretty_resid("NO2", title = "Residuals for Nitrogen Dioxide")
+    pretty_resid("NO2", title = "Residuals for Nitrogen Dioxide [μg/m³]")
+train_ts %>%
+    filter(year(Date) == 2005) %>% 
+    autoplot(NO2) +
+    autolayer(forecast(model_NO2, test_ts), NO2, color = colors["NO2"]) +
+    autolayer(test_ts, NO2, color = "#838B8B", alpha = 0.75) +
+    labs(x = "", y = "Nitrogen Dioxide [μg/m³]") +
+    coord_cartesian(ylim = c(NA, 500))
 ```
 
-### Conclusions
-
-We observe that for all the polluting agents the best model overall was Prophet.
+We observe that for all the polluting agents the best model overall was Prophet
+except for NO2 where automatic ARIMA performed best.
 Hence, we will use it in the following section to forecast the concentration
 of the various gases in order to test their effect on the temperature.
-
-Let us plot the forecasts on the test partitions for all the agents.
-We observe that Prophet is able to, at least for the naked eye, capture
-the tendency of the data and provide a wide enough so that the actual recorded
-data fits inside while not being so wide as not to provide
-any insight whatsoever.
-Nonetheless, the prediction is not even close to the actual data, which
-is to be expected from the high frequency of this time series.
-
-```{r}
-p1 <- train_ts %>%
-    filter(year(Date) == 2005) %>% 
-    autoplot(CO) +
-    autolayer(forecast(prophet_CO,   test_ts),  CO,  colour = colors["CO"]) +
-    autolayer(test_ts, CO,   color = "#838B8B", alpha = 0.75) +
-    labs(x = "", y = "Carbon Monoxide")
-p2 <- train_ts %>%
-    filter(year(Date) == 2005) %>% 
-    autoplot(C6H6) +
-    autolayer(forecast(prophet_C6H6, test_ts), C6H6, colour = colors["C6H6"]) +
-    autolayer(test_ts, C6H6, color = "#838B8B", alpha = 0.75) +
-    labs(x = "", y = "Benzene")
-p3 <- train_ts %>%
-    filter(year(Date) == 2005) %>% 
-    autoplot(NOy) +
-    autolayer(forecast(prophet_NOy,  test_ts), NOy,  colour = colors["NOy"]) +
-    autolayer(test_ts, NOy,  color = "#838B8B", alpha = 0.75) +
-    labs(x = "", y = "Nitrogen Oxides")
-p4 <- train_ts %>%
-    filter(year(Date) == 2005) %>% 
-    autoplot(NO2) +
-    autolayer(forecast(prophet_NO2,  test_ts), NO2,  colour = colors["NO2"]) +
-    autolayer(test_ts, NO2,  color = "#838B8B", alpha = 0.75) +
-    labs(x = "", y = "Nitrogen Dioxide")
-p1 / p2
-p3 / p4
-```
-
-Finally, we train the models with the whole time series
-and forecast for the next 6 months.
-
-```{r agentsall, message=FALSE, results=FALSE, cache=TRUE}
-lam_CO   <- auto_lambda(data_ts$CO)
-lam_C6H6 <- auto_lambda(data_ts$C6H6)
-lam_NOy  <- auto_lambda(data_ts$NOy)
-lam_NO2  <- auto_lambda(data_ts$NO2)
-
-forecast_CO   <- data_ts %>% 
-    model(prophet(box_cox(CO, lam_CO) ~ season(period = 24))) %>% 
-    forecast(h = "6 months")
-forecast_C6H6 <- data_ts %>% 
-    model(prophet(box_cox(C6H6, lam_C6H6) ~ season(period = 24))) %>% 
-    forecast(h = "6 months")
-forecast_NOy  <- data_ts %>% 
-    model(prophet(box_cox(NOy, lam_NOy) ~ season(period = 24))) %>% 
-    forecast(h = "6 months")
-forecast_NO2  <- data_ts %>% 
-    model(prophet(box_cox(NO2, lam_NO2) ~ season(period = 24))) %>% 
-    forecast(h = "6 months")
-```
-
-```{r}
-p1 <- data_ts %>% 
-    autoplot(CO) +
-    autolayer(forecast_CO,   CO,   color = colors["CO"]) +
-    labs(x = "", y = "Carbon Monoxide")
-p2 <- data_ts %>% 
-    autoplot(C6H6) +
-    autolayer(forecast_C6H6, C6H6, color = colors["C6H6"]) +
-    labs(x = "", y = "Benzene")
-p3 <- data_ts %>% 
-    autoplot(NOy) +
-    autolayer(forecast_NOy,  NOy,  color = colors["NOy"]) +
-    labs(x = "", y = "Nitrogen Oxides") +
-    coord_cartesian(ylim = c(NA, 1500))
-p4 <- data_ts %>% 
-    autoplot(NO2) +
-    autolayer(forecast_NO2,  NO2,  color = colors["NO2"]) +
-    labs(x = "", y = "Nitrogen Dioxide")
-p1 / p2
-p3 / p4
-```
+For now, let us move on to temperature and how a univariate and multivariate
+approach on its forecast may behave.
 
 ## Temperature
 
@@ -886,16 +807,10 @@ Looking at the ACF and PACF we decide that an $ARIMA(2,0,0)(2,1,0)[24]$ is
 the optimal choice.
 Having that in mind, we proceed to test this model along with the rest of the
 considered: auto ARIMA, auto ETS, Prophet and TSLM.
-Different to how we did for the agents, we want here to incorporate the clear
-yearly period we observe looking at the time series.
-We do so by incorporating an additional fourier term to the TSLM model which
-accepts without problems such terms.
-To compensate, we reduce the number of terms included for the daily contribution.
 
-```{r models_temp, message=FALSE, results=FALSE, cache=TRUE}
+```{r models_Temp, cache=TRUE}
 # Look at PACF    => p = 2
 # Look at PACF_24 => P = 2
-best_Temp <- rep(0, length(cvsplits$splits))
 for (sp in enumerate(cvsplits$splits)) {
     trndat <- training(sp[[2]]) %>% as_tsibble(index = Date)
     tstdat <- testing(sp[[2]])  %>% as_tsibble(index = Date)
@@ -906,224 +821,257 @@ for (sp in enumerate(cvsplits$splits)) {
             auto_arima   = ARIMA(Temp ~ PDQ(period = 24)),
             prophet      = prophet(Temp ~ season(period = 24)),
             auto_ets     = ETS(Temp ~ season(period = 24)),
-            auto_tslm    = TSLM(Temp ~ trend() + fourier(period = 24, K = 3) +
-                                    fourier(period = "1 year", K = 1))
-        ) %>% 
+            auto_tslm    = TSLM(Temp ~ trend() + fourier(period = "1 day",   K = 3) +
+                                    fourier(period = "1 year",  K = 3))) %>% 
         forecast(tstdat) %>% 
         accuracy(data_ts)
     
-    best_Temp[sp$ix] <- which.min(models_Temp$RMSE)
+    print(paste("The best model for split", sp$ix, "is",
+                models_Temp$.model[which.min(models_Temp$RMSE)]))
 }
 ```
 
-Based on the RMSE, we see which model better performed for the temperature.
+Let us proceed as usual and look at residuals and performance
+in the test partition.
+Residuals exhibit the same behaviour as we noted with the
+polluting agents, with a normal distribution zero-centred but
+very high correlations as noted in the ACF.
+For the performance in the test partition, we note a very poor
+prediction which, although not bad for the first month,
+quickly starts falling below the actual recorded data.
+This is a sign that the model is not able to see the whole
+yearly seasonality, which is not too rare considering that
+we only have one full year of data, hence less in the
+train partition.
 
-```{r temp_print, cache=TRUE}
-for (ix in seq_along(cvsplits$splits)) {
-    print(paste("The best model for split", ix, "is", models_Temp$.model[best_Temp[ix]]))
-}
-print(paste("The best model overall is", models_Temp$.model[most_freq(best_Temp)]))
-```
-
-In contrast with the agents, here the best performing model are both,
-TSLM and automatic ARIMA.
-Having to choose between one of them, we stick with TSLM for the
-easy interpretable reports and the fast training time.
-The residuals of the chosen model exhibit the same behaviour as
-for the gases of a noisy series with normal distribution but
-prominent autocorrelations noted in the ACF.
-
-```{r, message=FALSE}
-tslm_Temp <- train_ts %>% 
-    model(TSLM(Temp ~ trend() + fourier(period = 24, K = 3) +
-                                    fourier(period = "1 year", K = 1)))
-tslm_Temp %>% 
+```{r Temp_test, cache=TRUE}
+model_Temp <- train_ts %>%
+    model(prophet(Temp ~ season(period = 24)))
+model_Temp %>%
     residuals() %>%
     pretty_resid("Temp", title = "Residuals for Temperature")
-```
-
-Looking at the performance in the test partition we note that the model
-is not able to capture the annual seasonality, which is to be expected given
-we have only ten months in the training set.
-However, it does capture the tendency without problems and the confidence
-intervals cover the observed values and not more.
-Overall, these are very satisfying results.
-
-```{r}
 train_ts %>%
     filter(year(Date) == 2005) %>% 
     autoplot(Temp) +
-    autolayer(forecast(tslm_Temp, test_ts), Temp, colour = colors["Temp"]) +
+    autolayer(forecast(model_Temp, test_ts), Temp, colour = colors["Temp"]) +
     autolayer(test_ts, Temp, color = "#838B8B", alpha = 0.75) +
-    labs(x = "", y = "Temperature")
+    labs(x = "", y = "Temperature [°C]")
 ```
 
-It thus comes the time to plot the forecast for the following 6 months.
-Note how the Fourier term is jey to predicting the expected oscillation,
-with stable confidence intervals in the whole forecasting horizon.
+Without further ado, let us move directly to the last point of this
+whole section, the multivariate forecast on the temperature.
 
-```{r tempall, message=FALSE}
-forecast_Temp <- data_ts %>% 
-    model(TSLM(Temp ~ trend() + fourier(period = 24, K = 3) +
-                                    fourier(period = "1 year", K = 1))) %>% 
-    forecast(h = "6 months")
-
-data_ts %>% 
-    autoplot(Temp) +
-    autolayer(forecast_Temp, Temp, color = colors["Temp"]) +
-    labs(x = "", y = "Temperature")
-```
-
-### Forecasting with predictors
+### Multivariate model
 
 We are now going to consider adding the gases to the model of the
 temperature.
-For this, we use the same model, only now with the gases as well as
-with a one day retarded concentration of agents to account for possible
-retarded effect.
+For this, we will compare two models which work very well and with good
+stability when adding predictors [^3]: TSLM and VAR.
+Note that the VAR model is able to predict not only for the temperature
+but also for all the agents at once.
+Nonetheless, we are interested in the temperature as we expect
+the presence of one concrete agent not to have a big impact on
+another [^4].
+Hence we will only compare the performance for the temperature.
 
-We engage in a manual iterative process removing predictors which does not
+[^3]: Inner testing showed that Prophet, ETS and ARIMA tend to give
+null models frequently when adding predictors.
+Moreover, the two model considered here offer a very neat way of
+knowing whether the considered variables are indeed related with
+the temperature or, as in the case of VAR, provide a feature
+selection on in itself.
+
+[^4]: This is not to mean that concentrations are not going to be correlated,
+which they are going to be, but rather that the high concentration of
+one agent should not produce an effect on the rest, as the relation should
+lie in both having the same emit channels.
+
+Let us start by determining the TSLM to compare by engaging
+in a manual iterative process removing predictors which does not
 happen to be related with the temperature.
+We consider in first approximation all the polluting agents at the
+same moment and with one day retarded effect.
 
 ```{r}
 # All
 predict_model <- train_ts %>% 
-    model(TSLM(TempM ~ trend() + fourier(period = 24, K = 3) +
-                       fourier(period = "1 year", K = 1) + 
+    model(TSLM(TempM ~ trend() + fourier(period = "1 day", K = 3) +
+                       fourier(period = "1 year", K = 3) + 
                        CO + C6H6 + NOy + NO2 +
+                       lag(CO, 24) + lag(C6H6, 24) + lag(NOy, 24) + lag(NO2, 24)))
+predict_model %>% report()
+
+# NO2 out
+predict_model <- train_ts %>% 
+    model(TSLM(TempM ~ trend() + fourier(period = "1 day", K = 3) +
+                       fourier(period = "1 year", K = 3) + 
+                       CO + C6H6 + NOy +
                        lag(CO, 24) + lag(C6H6, 24) + lag(NOy, 24) + lag(NO2, 24)))
 predict_model %>% report()
 
 # lag NOy out
 predict_model <- train_ts %>% 
-    model(TSLM(TempM ~ trend() + fourier(period = 24, K = 3) +
-                       fourier(period = "1 year", K = 1) + 
-                       CO + C6H6 + NOy + NO2 +
-                       lag(CO, 24) + lag(C6H6, 24) + lag(NO2, 24)))
-predict_model %>% report()
-
-# NO2 out
-predict_model <- train_ts %>% 
-    model(TSLM(TempM ~ trend() + fourier(period = 24, K = 3) +
-                       fourier(period = "1 year", K = 1) + 
+    model(TSLM(TempM ~ trend() + fourier(period = "1 day", K = 3) +
+                       fourier(period = "1 year", K = 3) + 
                        CO + C6H6 + NOy +
                        lag(CO, 24) + lag(C6H6, 24) + lag(NO2, 24)))
 predict_model %>% report()
 
-# lag NO2 out
+# fourier K = 2
 predict_model <- train_ts %>% 
-    model(TSLM(TempM ~ trend() + fourier(period = 24, K = 3) +
-                       fourier(period = "1 year", K = 1) + 
+    model(TSLM(TempM ~ trend() + fourier(period = "1 day", K = 3) +
+                       fourier(period = "1 year", K = 2) + 
                        CO + C6H6 + NOy +
-                       lag(CO, 24) + lag(C6H6, 24)))
-predict_model %>% report()
-
-# lag CO out
-predict_model <- train_ts %>% 
-    model(TSLM(TempM ~ trend() + fourier(period = 24, K = 3) +
-                       fourier(period = "1 year", K = 1) + 
-                       CO + C6H6 + NOy + lag(C6H6, 24)))
+                       lag(CO, 24) + lag(C6H6, 24) + lag(NO2, 24)))
 predict_model %>% report()
 ```
 
 We end up with a model that includes the concentrations of
-Carbon Monoxide, Benzene, Nitrogen Oxides [^3] and a one
-day retarded concentration of Benzene.
-Let us follow by looking at the residuals of the model, which
-again follow the exact same behaviour we observed for all
-previous series.
+Carbon Monoxide, Benzene, Nitrogen Oxides [^5] and a one
+day retarded concentration of Carbon Monoxide, Benzene and
+Nitrogen Dioxide.
 
-[^3]: Remember that this variable excludes (to a first approximation) the
+[^5]: Remember that this variable excludes (to a first approximation) the
 contributions due to Nitrogen Dioxide.
 
-```{r, message=FALSE}
-predict_model %>% 
+Now we use cross-validation as before to compare this model
+with the one that VAR may predict for us.
+
+```{r models_TempM, cache=TRUE}
+models_TempM <- c("VAR", "TSLM")
+for (sp in enumerate(cvsplits$splits)) {
+    trndat <- training(sp[[2]]) %>% as_tsibble(index = Date)
+    tstdat <- testing(sp[[2]])  %>% as_tsibble(index = Date)
+    
+    var_model  <- trndat %>% 
+        model(VAR(vars(Temp, CO, C6H6, NOy, NO2) ~ AR(24) + AR(8766))) %>% 
+        forecast(tstdat) %>% 
+        accuracy(data_ts)
+    
+    tslm_model <- trndat %>% 
+        model(TSLM(TempM ~ trend() + fourier(period = "1 day", K = 3) +
+                       fourier(period = "1 year", K = 2) + 
+                       CO + C6H6 + NOy +
+                       lag(CO, 24) + lag(C6H6, 24) + lag(NO2, 24))) %>% 
+        forecast(tstdat) %>% 
+        accuracy(data_ts)
+    
+    best_TempM <- which.min(c(filter(var_model, .response == "Temp")$RMSE,
+                                    tslm_model$RMSE))
+    print(paste("The best model for split", sp$ix, "is", models_TempM[best_TempM]))
+}
+```
+
+Now that we have checked that the best model for the temperature
+is the considered TSLM, we follow by looking at the residuals of the model,
+which again follow the exact same behaviour we observed for all previous series.
+The performance on the test partition is kind of similar to the one
+we observed when no predictors were considered.
+However, this time there is an slight bend upwards which indicates
+that the model has captured better the tendency.
+This gives us hopes for the future forecasts.
+
+```{r TempM_test, cache=TRUE}
+model_TempM <- train_ts %>%
+    model(TSLM(TempM ~ trend() + fourier(period = "1 day", K = 3) +
+                       fourier(period = "1 year", K = 2) + 
+                       CO + C6H6 + NOy +
+                       lag(CO, 24) + lag(C6H6, 24) + lag(NO2, 24)))
+model_TempM %>%
     residuals() %>%
     pretty_resid("TempM", title = "Residuals for Temperature (multi)")
-```
-
-If we look at the performance on the train partition we note
-that, as in the case without predictors, the tendency is well
-captured and the confidence intervals provide in the majority
-the range that the temperature actually follows.
-
-```{r}
 train_ts %>%
     filter(year(Date) == 2005) %>% 
-    autoplot(TempM) +
-    autolayer(forecast(predict_model, test_ts), TempM, colour = colors["TempM"]) +
+    autoplot(Temp) +
+    autolayer(forecast(model_TempM, test_ts), TempM, colour = colors["TempM"]) +
     autolayer(test_ts, TempM, color = "#838B8B", alpha = 0.75) +
-    labs(x = "", y = "Temperature (multi)")
+    labs(x = "", y = "Temperature (multi) [°C]")
 ```
 
-Now we may look at the 6 month forecast into the future.
-We see a very similar prediction as before without the gases
-which is to be expected taking in account that polluting
-agents are known to not have very noticeable instant effects.
-Anyways, we will compare both models in the following part.
+## Six month forecasts and conclusions
 
-```{r}
-future_data    <- new_data(data_ts, n = 4383) %>%
+Finally we end all the work done in this section by using the selected
+models in a six-month forecast of both, the polluting agents and the
+two models for the temperature.
+We note that all of the predictions look reasonable in general terms,
+especially on the first few months of the forecast.
+Later, the confidence intervals either explode, giving us little to
+none information, or the forecasts reach unphysical results.
+
+The latter observation is more prominent for the univariate temperature model.
+On the other hand, the multivariate model encapsulates the yearly seasonality and
+provides well reasonable and stable prediction intervals.
+Hence we claim that by accounting for the possible effects of the different
+polluting agents, we end with a very reasonable model for future temperature
+forecast.
+
+```{r future_forecasts, cache=TRUE}
+# Box-Cox lambdas
+lam_CO   <- auto_lambda(data_ts$CO)
+lam_C6H6 <- auto_lambda(data_ts$C6H6)
+lam_NOy  <- auto_lambda(data_ts$NOy)
+lam_NO2  <- auto_lambda(data_ts$NO2)
+
+# Forecast of univariate models
+forecast_CO   <- data_ts %>% 
+    model(prophet(box_cox(CO, lam_CO) ~ season(period = 24))) %>% 
+    forecast(h = "6 months")
+forecast_C6H6 <- data_ts %>% 
+    model(prophet(box_cox(C6H6, lam_C6H6) ~ season(period = 24))) %>% 
+    forecast(h = "6 months")
+forecast_NOy  <- data_ts %>% 
+    model(prophet(box_cox(NOy, lam_NOy) ~ season(period = 24))) %>% 
+    forecast(h = "6 months")
+forecast_NO2  <- data_ts %>% 
+    model(ARIMA(box_cox(NO2, lam_NO2) ~ PDQ(period = 24))) %>% 
+    forecast(h = "6 months")
+forecast_Temp <- data_ts %>% 
+    model(prophet(Temp ~ season(period = 24))) %>% 
+    forecast(h = "6 months")
+
+# Forecast of multivariate model
+future_data <- new_data(data_ts, n = nrow(forecast_Temp)) %>%
     mutate(CO  = forecast_CO$.mean,  C6H6 = forecast_C6H6$.mean,
            NOy = forecast_NOy$.mean, NO2  = forecast_NO2$.mean)
-forecast_multi <- data_ts %>% 
+forecast_TempM <- data_ts %>% 
     model(TSLM(TempM ~ trend() + fourier(period = 24, K = 3) +
-                       fourier(period = "1 year", K = 1) + 
-                       CO + C6H6 + NOy + lag(C6H6, 24))) %>% 
+                       fourier(period = "1 year", K = 2) + 
+                       CO + C6H6 + NOy +
+                       lag(CO, 24) + lag(C6H6, 24) + lag(NO2, 24))) %>% 
     forecast(future_data)
-data_ts %>% 
-    autoplot(Temp) +
-    autolayer(forecast_multi, TempM, color = colors["TempM"]) +
-    labs(x = "", y = "Temperature (multi)")
-```
 
-## Conclusions
-
-In this section we have forecasted six months into the future
-the four considered polluting agents and the temperature.
-For the latter, we tried two different approaches: one with
-an univariate fit and another with a multivariate fit including
-the different gases concentrations into the model.
-We note that there is almost no difference between these two
-approaches.
-However, if looking very closely one may note a very slight
-shrink in the confidence intervals and the amplitude of the 
-oscillations in the multivariate model.
-
-With all in mind, we may summarise our findings in the
-next image where we plot all the forecast we have made
-so far 6 months into the future.
-We note that all of them appear likely and non-pathological.
-We claim thus that the targeted goal for this whole
-part of the project has been successfully accomplished.
-
-```{r}
+# Plot all of them
 p1 <- data_ts %>% 
     autoplot(CO) +
     autolayer(forecast_CO,    CO,    color = colors["CO"]) +
-    labs(x = "", y = "Carbon Monoxide")
+    labs(x = "", y = "Carbon Monoxide [mg/m³]")
 p2 <- data_ts %>% 
     autoplot(C6H6) +
     autolayer(forecast_C6H6,  C6H6,  color = colors["C6H6"]) +
-    labs(x = "", y = "Benzene")
+    labs(x = "", y = "Benzene [μg/m³]")
 p3 <- data_ts %>% 
     autoplot(NOy) +
     autolayer(forecast_NOy,   NOy,   color = colors["NOy"]) +
-    labs(x = "", y = "Nitrogen Oxides") +
+    labs(x = "", y = "Nitrogen Oxides [ppb]") +
     coord_cartesian(ylim = c(NA, 1500))
 p4 <- data_ts %>% 
     autoplot(NO2) +
     autolayer(forecast_NO2,   NO2,   color = colors["NO2"]) +
-    labs(x = "", y = "Nitrogen Dioxide")
+    labs(x = "", y = "Nitrogen Dioxide [μg/m³]") +
+    coord_cartesian(ylim = c(0, 500))
 p5 <- data_ts %>% 
     autoplot(Temp) +
     autolayer(forecast_Temp,  Temp,  color = colors["Temp"]) +
-    labs(x = "", y = "Temperature")
+    labs(x = "", y = "Temperature [°C]")
 p6 <- data_ts %>% 
     autoplot(TempM) +
-    autolayer(forecast_multi, TempM, color = colors["TempM"]) +
-    labs(x = "", y = "Temperature (multi)")
+    autolayer(forecast_TempM, TempM, color = colors["TempM"]) +
+    labs(x = "", y = "Temperature (multi) [°C]")
 p1 / p2
 p3 / p4
 p5 / p6
 ```
+
+
+
+
