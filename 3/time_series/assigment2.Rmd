@@ -525,7 +525,7 @@ models_CO %>%
     rename(.model_desc = .model) %>% 
     relocate(c(MAE, MAPE, MASE, RMSE), .after = .model_desc) %>% 
     select(!c(ME, MPE, RMSSE,  ACF1)) %>% 
-    table_modeltime_accuracy(theme = cosmo(), showSortIcon = FALSE)
+    table_modeltime_accuracy(theme = cosmo(), showSortIcon = FALSE, .searchable = FALSE)
 
 print(paste("The best model for Carbon Monoxide is",
             models_CO$.model[which.min(models_CO$MAE)]))
@@ -629,7 +629,7 @@ models_C6H6 %>%
     rename(.model_desc = .model) %>% 
     relocate(c(MAE, MAPE, MASE, RMSE), .after = .model_desc) %>% 
     select(!c(ME, MPE, RMSSE,  ACF1)) %>% 
-    table_modeltime_accuracy(theme = cosmo(), showSortIcon = FALSE)
+    table_modeltime_accuracy(theme = cosmo(), showSortIcon = FALSE, .searchable = FALSE)
 
 print(paste("The best model for Benzene is",
             models_C6H6$.model[which.min(models_C6H6$MAE)]))
@@ -732,7 +732,7 @@ models_NOy %>%
     rename(.model_desc = .model) %>% 
     relocate(c(MAE, MAPE, MASE, RMSE), .after = .model_desc) %>% 
     select(!c(ME, MPE, RMSSE,  ACF1)) %>% 
-    table_modeltime_accuracy(theme = cosmo(), showSortIcon = FALSE)
+    table_modeltime_accuracy(theme = cosmo(), showSortIcon = FALSE, .searchable = FALSE)
 
 print(paste("The best model for Nitrogen Oxides is",
             models_NOy$.model[which.min(models_NOy$MAE)]))
@@ -839,7 +839,7 @@ models_NO2 %>%
     rename(.model_desc = .model) %>% 
     relocate(c(MAE, MAPE, MASE, RMSE), .after = .model_desc) %>% 
     select(!c(ME, MPE, RMSSE,  ACF1)) %>% 
-    table_modeltime_accuracy(theme = cosmo(), showSortIcon = FALSE)
+    table_modeltime_accuracy(theme = cosmo(), showSortIcon = FALSE, .searchable = FALSE)
 
 print(paste("The best model for Nitrogen Dioxides is",
             models_NO2$.model[which.min(models_NO2$MAE)]))
@@ -950,7 +950,7 @@ models_Temp %>%
     rename(.model_desc = .model) %>% 
     relocate(c(MAE, MAPE, MASE, RMSE), .after = .model_desc) %>% 
     select(!c(ME, MPE, RMSSE,  ACF1)) %>% 
-    table_modeltime_accuracy(theme = cosmo(), showSortIcon = FALSE)
+    table_modeltime_accuracy(theme = cosmo(), showSortIcon = FALSE, .searchable = FALSE)
 
 print(paste("The best model for Temperature is",
             models_Temp$.model[which.min(models_Temp$MAE)]))
@@ -1100,7 +1100,7 @@ models_TempM %>%
     rename(.model_desc = .model) %>% 
     relocate(c(MAE, MAPE, MASE, RMSE), .after = .model_desc) %>% 
     select(!c(ME, MPE, RMSSE,  ACF1)) %>% 
-    table_modeltime_accuracy(theme = cosmo(), showSortIcon = FALSE)
+    table_modeltime_accuracy(theme = cosmo(), showSortIcon = FALSE, .searchable = FALSE)
 
 print(paste("The best model for Temperature (multi) is",
             models_TempM$.model[which.min(models_TempM$MAE)]))
@@ -1172,7 +1172,7 @@ forecast_NOy  <- data_ts %>%
     model(prophet(box_cox(NOy, lam_NOy) ~ season(period = 24))) %>% 
     forecast(h = "6 months")
 forecast_NO2  <- data_ts %>% 
-    model(ARIMA(box_cox(NO2, lam) ~ 1 + pdq(2, 0, 0) +
+    model(ARIMA(box_cox(NO2, lam_NO2) ~ 1 + pdq(2, 0, 0) +
                     PDQ(0, 1, 3, period = 24), method = "CSS")) %>% 
     forecast(h = "6 months")
 forecast_Temp <- data_ts %>% 
@@ -1207,8 +1207,7 @@ p3 <- data_ts %>%
 p4 <- data_ts %>% 
     autoplot(NO2) +
     autolayer(forecast_NO2,   NO2,   color = colors["NO2"]) +
-    labs(x = "", y = "Nitrogen Dioxide [μg/m³]") +
-    coord_cartesian(ylim = c(0, 500))
+    labs(x = "", y = "Nitrogen Dioxide [μg/m³]")
 p5 <- data_ts %>% 
     autoplot(Temp) +
     autolayer(forecast_Temp,  Temp,  color = colors["Temp"]) +
@@ -1254,6 +1253,7 @@ XGBoost, NNetar (neural network), Prophet (boost and regression) and boost ARIMA
 # Load here to avoid errors with previous parts
 require(tidymodels)         || i.p("tidymodels")         && require(tidymodels)
 require(modeltime.resample) || i.p("modeltime.resample") && require(modeltime.resample)
+require(modeltime.ensemble) || i.p("modeltime.ensemble") && require(modeltime.ensemble)
 
 recipe_spec <- recipe(TempM ~ Date + CO + C6H6 + NOy + NO2,
                       training(traintest)) %>%
@@ -1328,7 +1328,7 @@ accuracy_resample <- models_resample %>%
     select(!c(.type, N, SMAPE, RSQ))
 
 accuracy_resample %>%
-    table_modeltime_accuracy(theme = cosmo(), .show_sortable = FALSE)
+    table_modeltime_accuracy(theme = cosmo(), .show_sortable = FALSE, .searchable = FALSE)
 
 # Print the best
 best_models <- accuracy_resample$.model_desc[order(accuracy_resample$MAE)[1:3]]
@@ -1366,7 +1366,7 @@ calibrated_ml %>%
     rename_with(~ toupper(.x), .cols = !starts_with(".")) %>% 
     mutate(MAPE = MAAPE) %>% 
     select(!c(.type, MAAPE, SMAPE, RSQ)) %>% 
-    table_modeltime_accuracy(theme = cosmo(), .show_sortable = FALSE)
+    table_modeltime_accuracy(theme = cosmo(), .show_sortable = FALSE, .searchable = FALSE)
 ```
 
 At last, we forecast for half a year.
@@ -1387,6 +1387,28 @@ final_ml %>%
                        actual_data = as_tibble(data_ts)) %>%
     plot_modeltime_forecast(.legend_max_width = 25)
 ```
+
+As a final addition, we plot the mean of the forecast using an ensemble model
+
+```{r}
+ensemble_ml <- final_ml %>%
+    ensemble_average(type = "mean")
+
+ensemble_ml %>%
+    modeltime_calibrate(testing(traintest)) %>%
+    modeltime_accuracy(metric_set = extended_forecast_accuracy_metric_set()) %>% 
+    rename_with(~ toupper(.x), .cols = !starts_with(".")) %>% 
+    mutate(MAPE = MAAPE) %>% 
+    select(!c(.type, MAAPE, SMAPE, RSQ)) %>% 
+    table_modeltime_accuracy(theme = cosmo(), .show_sortable = FALSE, .searchable = FALSE)
+
+ensemble_ml %>%
+    modeltime_table() %>% 
+    modeltime_forecast(new_data    = as_tibble(future_data),
+                       actual_data = as_tibble(data_ts)) %>%
+    plot_modeltime_forecast(.legend_max_width = 25)
+```
+
 
 # Conclusions
 
